@@ -1,0 +1,70 @@
+name: Generate Big Files Using GitHub Actions
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_size:
+        description: 'Size of the file (e.g., 200)'
+        required: true
+        default: '1'
+      size_type:
+        description: 'Unit of the file size (B, KB, MB, GB)'
+        required: true
+        default: 'B'
+
+jobs:
+  create-file:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Get git user name and email
+      id: git-info
+      run: |
+        GIT_NAME=$(git log -1 --pretty=format:'%an')
+        GIT_EMAIL=$(git log -1 --pretty=format:'%ae')
+        echo "GIT_NAME=$GIT_NAME" >> $GITHUB_ENV
+        echo "GIT_EMAIL=$GIT_EMAIL" >> $GITHUB_ENV
+
+    - name: Create file with specified size
+      run: |
+        FILE_SIZE=${{ github.event.inputs.file_size }}
+        SIZE_TYPE=${{ github.event.inputs.size_type }}
+        case $SIZE_TYPE in
+          B|b) MULTIPLIER=1 ;;
+          KB|kb|Kb|kB) MULTIPLIER=1000 ;;
+          MB|mb|Mb|mB) MULTIPLIER=1000000 ;;
+          GB|gb|Gb|gB) MULTIPLIER=1000000000 ;;
+          *) echo "Invalid unit"; exit 1 ;;
+        esac
+        FILE_SIZE_BYTES=$(( FILE_SIZE * MULTIPLIER ))
+
+        if [ $FILE_SIZE_BYTES -gt 1000000000 ]; then
+          echo "File size cannot be greater than 1GB"; exit 1;
+        fi
+
+        mkdir -p files
+        FILE_NAME="files/${FILE_SIZE}${SIZE_TYPE}.md"
+        echo "Creating file: $FILE_NAME with size: $FILE_SIZE_BYTES bytes"
+        base64 /dev/urandom | head -c $FILE_SIZE_BYTES > "$FILE_NAME"
+        ls -lh "$FILE_NAME"
+
+    - name: Update DIRECTORY.md
+      run: |
+        FILE_NAME="files/${{ github.event.inputs.file_size }}${{ github.event.inputs.size_type }}.md"
+        CREATED_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        echo "| [${{ github.event.inputs.file_size }}${{ github.event.inputs.size_type }}.md](${FILE_NAME}) | Random content file | ${{ github.event.inputs.file_size }}${{ github.event.inputs.size_type }} | ${CREATED_DATE} |" >> DIRECTORY.md
+
+    - name: Commit and push file
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        FILE_NAME="files/${{ github.event.inputs.file_size }}${{ github.event.inputs.size_type }}.md"
+        echo "Adding file: $FILE_NAME and updating DIRECTORY.md"
+        git config --global user.name "${{ env.GIT_NAME }}"
+        git config --global user.email "${{ env.GIT_EMAIL }}"
+        git add "$FILE_NAME" DIRECTORY.md
+        git commit -m "Add ${FILE_NAME} and update DIRECTORY.md"
+        git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
